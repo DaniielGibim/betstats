@@ -1,0 +1,141 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String       @id @default(uuid())
+  name            String
+  email           String       @unique
+  passwordHash    String?
+  role            String       @default("usuario")
+  slug            String       @unique
+  avatarUrl       String?
+  autoSettle      Boolean      @default(true)
+  deteccaoCasa    Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  bancas          Banca[]
+  telegramAccount UserTelegram?
+  assinatura      Assinatura?
+}
+
+model UserTelegram {
+  id              String       @id @default(uuid())
+  userId          String       @unique
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telegramId      String?      @unique
+  name            String?
+  username        String?
+  codigoVinculo   String?
+  codigoValidoAte DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Plan {
+  id              String       @id @default(uuid())
+  name            String       // "Plano Gratuito", "Plus"
+  price           Float        @default(0.00)
+  periodicity     String       @default("year")
+  limiteApostas   Int          @default(10)
+  limiteTips      Int          @default(10)
+  assinaturas     Assinatura[]
+}
+
+model Assinatura {
+  id              String       @id @default(uuid())
+  userId          String       @unique
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId          String
+  plan            Plan         @relation(fields: [planId], references: [id])
+  status          String       @default("active")
+  startedAt       DateTime     @default(now())
+  expiresAt       DateTime?
+}
+
+model Banca {
+  id              String       @id @default(uuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nome            String       // Ex: "Oficial"
+  descricao       String?      // Descrição opcional da banca.
+  cor             String       @default("#3b82f6")
+  valorInicial    Float        @default(3000.00)
+  saldoBanco      Float        @default(3000.00)
+  unidadeEfetiva  Float        @default(100.00)
+  ativa           Boolean      @default(true)
+  padrao          Boolean      @default(true)
+  compartilhada   Boolean      @default(false)
+  slug            String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  contas          ContaBookmaker[]
+  transacoes      Transacao[]
+  apostas         Aposta[]
+}
+
+model ContaBookmaker {
+  id              String       @id @default(uuid())
+  bancaId         String
+  banca           Banca        @relation(fields: [bancaId], references: [id], onDelete: Cascade)
+  nomeCasa        String       // Ex: "Bet365", "Betano", "Betfair", "Estrelabet", "Superbet"
+  saldoAtual      Float        @default(0.00)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  transacoes      Transacao[]
+  apostas         Aposta[]
+}
+
+model Transacao {
+  id              String         @id @default(uuid())
+  bancaId         String
+  banca           Banca          @relation(fields: [bancaId], references: [id], onDelete: Cascade)
+  contaId         String?
+  conta           ContaBookmaker? @relation(fields: [contaId], references: [id])
+  tipo            String         // "APORTE", "RETIRADA", "DEPOSITO_CASA", "SAQUE_CASA", "AJUSTE"
+  valor           Float
+  data            DateTime       @default(now())
+  descricao       String?
+}
+
+model Aposta {
+  id              String         @id @default(uuid())
+  bancaId         String
+  banca           Banca          @relation(fields: [bancaId], references: [id], onDelete: Cascade)
+  contaId         String?
+  conta           ContaBookmaker? @relation(fields: [contaId], references: [id])
+  esporte         String         @default("Futebol")
+  evento          String         // Ex: "Cruzeiro x Athletico-PR"
+  mercado         String         // Ex: "Mais de 2.5 gols"
+  odd             Float          @default(1.50)
+  stake           Float          @default(10.00)
+  status          String         @default("PENDENTE") // "PENDENTE", "GREEN", "RED", "REEMBOLSO", "MEIO_GREEN", "MEIO_RED"
+  lucroPrejuizo   Float?
+  tipster         String?        // Ex: "Oficial", "Sem tipster"
+  dataJogo        DateTime       @default(now())
+  observacoes     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Tip {
+  id              String         @id @default(uuid())
+  titulo          String
+  descricao       String?
+  esporte         String
+  evento          String
+  mercado         String
+  oddRecomendada  Float          @default(1.80)
+  stakeSugerida   Float          @default(1.0)
+  resultado       String         @default("PENDENTE") // "PENDENTE", "GREEN", "RED", "REEMBOLSO"
+  dataEvento      DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+}

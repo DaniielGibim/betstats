@@ -1,0 +1,91 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# misc
+.DS_Store
+Thumbs.db
+desktop.ini
+*.pem
+*.key
+*.p12
+*.pfx
+
+# debug / logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# local env files (somente o exemplo sanitizado entra)
+.env
+.env.*
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# prisma sqlite / bancos locais
+/prisma/*.db
+/prisma/*.db-journal
+/prisma/*.db-wal
+/prisma/*.db-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# backups, dumps e exportações locais
+/backup/
+/backups/
+/dumps/
+/exports/
+*.bak
+*.backup
+*.dump
+*.sql.gz
+*.dump.gz
+
+# perfis de navegador / automação
+/chrome-debug-profile/
+/chrome-profile/
+/.puppeteer/
+/.playwright/
+/playwright-report/
+/test-results/
+
+# builds e caches locais
+/.turbo/
+/.cache/
+.eslintcache
+
+# graphify (artefatos gerados; não versionar)
+/graphify-out/
+
+# scripts de rascunho
+scratch_*
+
+# FORA DO BASELINE ATÉ AUDITORIA (não apagar; reavaliar antes de publicar)
+# Documentação e artefatos pendentes de auditoria
+# prisma/seed.js contém dados pessoais
+# .agents/ aguarda auditoria
+/docs/
+/prisma/seed.js
+/.agents/
