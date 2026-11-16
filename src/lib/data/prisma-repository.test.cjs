@@ -1,0 +1,44 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require('typescript');
+require.extensions['.ts'] = (mod, file) => mod._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, file);
+const { PrismaClient } = require(process.env.DATA_TEST_CLIENT);
+const { createDataRepository } = require('./prisma-repository.ts');
+const db = new PrismaClient({ datasources: { db: { url: process.env.DATA_TEST_DATABASE } } });
+(async () => {
+  const source = await db.dataSource.create({ data: { platform: 'synthetic', externalChatId: 'test-' + Date.now(), chatType: 'synthetic', authorizationRef: 'synthetic:test', authorizedAt: new Date('2026-01-01T00:00:00Z'), activatedAt: new Date('2026-01-02T00:00:00Z'), active: true } });
+  const run = await db.collectionRun.create({ data: { dataSourceId: source.id, startedAt: new Date('2026-01-02T00:00:00Z'), status: 'running', collectorVersion: 'synthetic-1' } });
+  const repo = createDataRepository(db);
+  const base = { sourceId: source.id, externalMessageId: '1', sourceDate: '2026-01-02T00:00:00Z', receivedAt: '2026-01-03T00:00:00Z', text: 'green', media: [{ type: 'image', reference: 'opaque-id' }] };
+  const input = { message: base, collectionRunId: run.id, candidateRecords: [{ recordKey: 'r1', evidenceText: 'green' }] };
+  assert.equal((await repo.ingest(input)).status, 'created');
+  for (let i = 0; i < 3; i++) assert.equal((await repo.ingest(input)).status, 'duplicate');
+  assert.equal((await repo.ingest({ ...input, message: { ...base, text: 'red', editDate: '2026-01-02T01:00:00Z' }, candidateRecords: [{ recordKey: 'r1', evidenceText: 'red' }] })).status, 'revised');
+  // An immutable envelope cannot acquire a classification on retry.
+  await assert.rejects(repo.ingest({ ...input, candidateRecords: [] }), /Envelope/);
+  const late = { ...input, message: { ...base, text: 'push', editDate: '2026-01-02T00:30:00Z' }, candidateRecords: [{ recordKey: 'r1', evidenceText: 'push' }] };
+  assert.equal((await repo.ingest(late)).status, 'quarantined');
+  const quarantined = (await repo.find(source.id, '1')).find(row => row.editState === 'quarantined');
+  assert.equal(quarantined.classifications.length, 0);
+  assert.equal(quarantined.validations[0].ruleCode, 'EDICAO_FORA_DE_ORDEM');
+  assert.equal((await repo.ingest(late)).status, 'duplicate');
+  assert.equal((await repo.findCurrent(source.id, '1')).rawText, 'red');
+  const returnToGreen = { ...input, message: { ...base, editDate: '2026-01-02T02:00:00Z' } };
+  assert.equal((await repo.ingest(returnToGreen)).status, 'revised');
+  assert.equal((await repo.findCurrent(source.id, '1')).rawText, 'green');
+  const concurrent = { ...input, message: { ...base, externalMessageId: 'concurrent' } };
+  const outcomes = await Promise.all([repo.ingest(concurrent), repo.ingest(concurrent)]);
+  assert.deepEqual(outcomes.map(x => x.status).sort(), ['created', 'duplicate']);
+  const history = await repo.find(source.id, '1');
+  assert.equal(history.length, 4); assert.equal(history[0].rawText, 'green'); assert.equal(history[0].media[0].fileUniqueId, 'opaque-id'); assert.equal(history[1].classifications[0].category, 'RED');
+  assert.equal((await repo.ingest({ ...input, message: { ...base, externalMessageId: '2', text: 'green' }, candidateRecords: [] })).status, 'created');
+  const withoutRecords = await repo.find(source.id, '2'); assert.equal(withoutRecords[0].classifications.length, 0); assert.equal(withoutRecords[0].validations[0].ruleCode, 'SEM_REGISTROS');
+  await assert.rejects(repo.ingest({ ...input, message: { ...base, externalMessageId: '2' } }), /Envelope/);
+  assert.equal((await repo.ingest({ ...input, message: { ...base, externalMessageId: '3', sourceDate: '2026-01-01T23:59:59Z', editDate: '2026-01-02T01:00:00Z' } })).status, 'ineligible');
+  await assert.rejects(repo.ingest({ ...input, message: { ...base, externalMessageId: '4' }, candidateRecords: [{ recordKey: 'x', evidenceText: 'red' }] }));
+  const failing = { $transaction: (fn) => db.$transaction(tx => fn({ ...tx, resultClassification: { createMany: () => { throw new Error('synthetic failure'); } } })), sourceMessage: db.sourceMessage };
+  await assert.rejects(createDataRepository(failing).ingest({ ...input, message: { ...base, externalMessageId: 'rollback' } }));
+  assert.equal(await db.sourceMessage.count({ where: { externalMessageId: 'rollback' } }), 0);
+  console.log('SQLite isolated ingestion, replay, edit, media, recordless, eligibility and rollback tests passed');
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => db.$disconnect());
