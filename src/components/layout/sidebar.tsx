@@ -17,6 +17,7 @@ import {
   Moon,
   Sun,
   ShieldAlert,
+  Radio,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { BankrollSelector } from "./bankroll-selector";
@@ -57,6 +58,7 @@ export function Sidebar() {
     { label: "Análise Gráfica", href: "/dashboard/analysis", icon: LineChart },
     { label: "Atualizar / Apostas", href: "/dashboard/update", icon: RefreshCw },
     { label: "Minhas Tips", href: "/dashboard/tips", icon: Sparkles },
+    { label: "Origens Telegram", href: "/dashboard/channels", icon: Radio },
     { label: "Tutoriais", href: "/dashboard/tutorials", icon: BookOpen },
     { label: "Suporte", href: "/dashboard/support", icon: Headphones },
     { label: "Perfil", href: "/dashboard/profile", icon: User },

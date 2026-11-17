@@ -21,6 +21,8 @@ model User {
   updatedAt       DateTime     @updatedAt
 
   bancas          Banca[]
+  dataSources     DataSource[]
+  sourceRegistrations SourceRegistration[]
   telegramAccount UserTelegram?
   assinatura      Assinatura?
 }
@@ -145,6 +147,8 @@ model Tip {
 // A source is inactive until its authorization is recorded and enabled.
 model DataSource {
   id               String          @id @default(uuid())
+  ownerUserId      String?
+  owner            User?           @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   platform         String          @default("telegram")
   externalChatId   String
   chatType         String
@@ -154,13 +158,36 @@ model DataSource {
   authorizedAt     DateTime
   activatedAt      DateTime?
   active           Boolean         @default(false)
+  removedAt        DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
   messages         SourceMessage[]
   collectionRuns   CollectionRun[]
+  registration     SourceRegistration?
 
   @@unique([platform, externalChatId])
+  @@unique([id, ownerUserId])
+  @@index([ownerUserId, active])
+}
+
+// A username is only a registration request until a canonical chat ID is resolved.
+model SourceRegistration {
+  id                 String      @id @default(uuid())
+  userId             String
+  user               User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  platform           String      @default("telegram")
+  requestedUsername  String
+  normalizedUsername String
+  status             String      @default("pending_resolution")
+  resolvedSourceId   String?
+  resolvedSource     DataSource? @relation(fields: [resolvedSourceId, userId], references: [id, ownerUserId], onDelete: Restrict, onUpdate: Restrict)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@unique([userId, platform, normalizedUsername])
+  @@unique([resolvedSourceId, userId])
+  @@index([userId, status])
 }
 
 // Each edit or observed deletion is a new revision. Never overwrite an earlier row.
