@@ -30,6 +30,11 @@ jobs:
         run: npx prisma generate
       - name: Prepare ephemeral SQLite schema
         run: npx prisma db push --skip-generate
+      - name: Run DATA synthetic tests
+        env:
+          DATA_TEST_CLIENT: "@prisma/client"
+          DATA_TEST_DATABASE: "file:./ci.db"
+        run: npm test
       - name: Generate Next.js types
         run: npx next typegen
       - name: Type-check

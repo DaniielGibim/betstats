@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "test": "node --test src/lib/data/classification.test.cjs src/lib/data/prisma-repository.test.cjs",
     "start": "next start",
     "lint": "next lint",
     "prisma:generate": "prisma generate",

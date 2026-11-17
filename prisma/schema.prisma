@@ -138,4 +138,150 @@ model Tip {
   resultado       String         @default("PENDENTE") // "PENDENTE", "GREEN", "RED", "REEMBOLSO"
   dataEvento      DateTime       @default(now())
   createdAt       DateTime       @default(now())
+
+  resultClassifications ResultClassification[]
+}
+
+// A source is inactive until its authorization is recorded and enabled.
+model DataSource {
+  id               String          @id @default(uuid())
+  platform         String          @default("telegram")
+  externalChatId   String
+  chatType         String
+  titleSnapshot    String?
+  usernameSnapshot String?
+  authorizationRef String
+  authorizedAt     DateTime
+  activatedAt      DateTime?
+  active           Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  messages         SourceMessage[]
+  collectionRuns   CollectionRun[]
+
+  @@unique([platform, externalChatId])
+}
+
+// Each edit or observed deletion is a new revision. Never overwrite an earlier row.
+model SourceMessage {
+  id                     String                 @id @default(uuid())
+  dataSourceId           String
+  dataSource             DataSource             @relation(fields: [dataSourceId], references: [id], onDelete: Restrict)
+  collectionRunId        String
+  collectionRun          CollectionRun          @relation(fields: [collectionRunId, dataSourceId], references: [id, dataSourceId], onDelete: Restrict)
+  externalMessageId      String
+  revision               Int
+  sourceDate             DateTime
+  editDate               DateTime?
+  collectedAt            DateTime               @default(now())
+  authorId               String?
+  authorUsernameSnapshot String?
+  authorDisplaySnapshot  String?
+  senderChatId           String?
+  replyToMessageId       String?
+  forwardedFrom          String?
+  rawText                String?
+  normalizedText         String?
+  entitiesJson           String?
+  payloadHash            String
+  payloadRawJson         String?
+  editState              String                 @default("original")
+  deletionEvidence       String?
+  collectorVersion       String
+
+  media                  MessageMedia[]
+  classifications        ResultClassification[]
+  validations            ValidationRecord[]
+
+  @@unique([dataSourceId, externalMessageId, revision])
+  @@index([dataSourceId, sourceDate])
+  @@index([collectionRunId])
+  @@index([payloadHash])
+}
+
+// Metadata only; media bytes are stored outside this schema, if ever authorized.
+model MessageMedia {
+  id               String        @id @default(uuid())
+  sourceMessageId  String
+  sourceMessage    SourceMessage @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+  mediaType        String
+  fileUniqueId     String?
+  mimeType         String?
+  fileSizeBytes    Int?
+  position         Int           @default(0)
+  createdAt        DateTime      @default(now())
+
+  @@unique([sourceMessageId, position])
+  @@index([fileUniqueId])
+}
+
+// One message can describe several independent betting records.
+model ResultClassification {
+  id              String        @id @default(uuid())
+  sourceMessageId String
+  sourceMessage   SourceMessage @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+  recordKey       String
+  tipId           String?
+  tip             Tip?          @relation(fields: [tipId], references: [id], onDelete: SetNull)
+  category        String
+  origin          String
+  confidence      String
+  evidence        String?
+  justification   String?
+  ruleCode        String?
+  flagsJson       String?
+  reviewRequired  Boolean       @default(false)
+  classifierVersion String
+  classifiedAt    DateTime      @default(now())
+
+  validations     ValidationRecord[]
+
+  @@index([sourceMessageId, recordKey, classifiedAt])
+  @@index([tipId])
+  @@index([category, classifiedAt])
+}
+
+// Findings are evidence records; correction of source data is a separate action.
+model ValidationRecord {
+  id                    String                @id @default(uuid())
+  sourceMessageId       String?
+  sourceMessage         SourceMessage?        @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+  resultClassificationId String?
+  resultClassification  ResultClassification? @relation(fields: [resultClassificationId], references: [id], onDelete: Restrict)
+  ruleCode              String
+  severity              String
+  evidence              String
+  description           String
+  status                String                @default("open")
+  validatorVersion      String
+  createdAt             DateTime              @default(now())
+  reviewedAt            DateTime?
+
+  @@index([sourceMessageId])
+  @@index([resultClassificationId])
+  @@index([status, severity])
+}
+
+model CollectionRun {
+  id               String          @id @default(uuid())
+  dataSourceId     String
+  dataSource       DataSource      @relation(fields: [dataSourceId], references: [id], onDelete: Restrict)
+  startedAt        DateTime
+  finishedAt       DateTime?
+  status           String
+  receivedCount    Int             @default(0)
+  newMessageCount  Int             @default(0)
+  skippedCount     Int             @default(0)
+  errorCount       Int             @default(0)
+  errorCode        String?
+  errorDetail      String?
+  collectorVersion String
+  createdAt        DateTime        @default(now())
+
+  messages         SourceMessage[]
+
+  @@unique([id, dataSourceId])
+  @@index([dataSourceId, startedAt])
+  @@index([status, startedAt])
 }
