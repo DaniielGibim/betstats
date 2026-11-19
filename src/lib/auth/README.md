@@ -1,9 +1,9 @@
 # Mission 5 backend contract
 
 Server-only services: never import these modules into client components. Node runtime,
-existing Prisma database, no new packages. This scope protects only the new source
-endpoints. Legacy endpoints remain outside this change; do not expose the app publicly
-until their authorization is reviewed.
+existing Prisma database, no new packages. All internal Route Handlers require a
+verified session. Private bankrolls, bets, financial operations and summaries are
+scoped to the session user; client ownership fields are rejected.
 
 Set SESSION_SECRET to an independently generated random secret of at least 32 bytes.
 No fallback, checked before registration, login and session verification; absent/short
@@ -60,3 +60,14 @@ client absolute path) and AUTH_TEST_DATABASE_URL (dedicated auth-test.sqlite URL
 Without these, integration is explicitly skipped. Never use a development database.
 The synthetic adapter accepts only platform=synthetic; missing delimitations become
 candidateRecords:[], leaving validation/review to DATA. No Telegram network traffic.
+
+Legacy internal API policy: /me returns only the authenticated profile and its usage,
+without codigoVinculo. /bancas, /apostas, /transacoes, /dashboard/all,
+/financial/widgets and /analysis/calendar enforce bankroll ownership; account IDs
+must belong to that bankroll. Foreign resource IDs return 404. Mutations require
+same-origin JSON (except bodyless DELETE), and private responses use no-store.
+/tips is deliberately a global shared catalog: every authenticated user can list
+and create catalog entries. Tip has no per-user ownership; this is not a private
+tips collection or a Telegram ingestion endpoint.
+Existing accounting formulas, initial-capital double counting and non-atomic
+bankroll setup are outside this isolation change and remain pending.

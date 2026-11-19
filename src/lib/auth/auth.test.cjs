@@ -208,3 +208,154 @@ test('source cap is per owner, atomic, frees slots only on removal, and never hi
     assert.equal((await service.list(user.id)).length, 100);
   } finally { await db.$disconnect(); await secondDb.$disconnect(); }
 });
+
+
+test('legacy routes authenticate, isolate owners and reject crossed account chains', { skip: !process.env.AUTH_TEST_CLIENT }, async () => {
+  const path = require('node:path');
+  const Module = require('node:module');
+  const isolatedUrl = process.env.AUTH_TEST_DATABASE_URL;
+  assert(isolatedUrl?.endsWith('/auth-test.sqlite'), 'Use the dedicated isolated database');
+  assert(!isolatedUrl.includes('..'));
+  const root = path.resolve(__dirname, '../..');
+  const resolve = Module._resolveFilename;
+  Module._resolveFilename = function(name, ...args) {
+    if (name.startsWith('@/')) name = path.join(root, name.slice(2));
+    if (name === '@prisma/client') name = process.env.AUTH_TEST_CLIENT;
+    return resolve.call(this, name, ...args);
+  };
+  const originalDatabase = process.env.DATABASE_URL;
+  const originalSecret = process.env.SESSION_SECRET;
+  process.env.DATABASE_URL = isolatedUrl;
+  const { NextRequest } = require('next/server');
+  const { prisma: db } = require('../prisma.ts');
+  const names = ['me', 'bancas', 'apostas', 'apostas/[id]', 'transacoes', 'tips', 'dashboard/all', 'financial/widgets', 'analysis/calendar'];
+  const routes = Object.fromEntries(names.map(name => [name, require('../../app/api/internal/' + name + '/route.ts')]));
+  const req = (name, method = 'GET', body, cookie, origin = 'http://127.0.0.1') => new NextRequest('http://127.0.0.1/api/internal/' + name, {
+    method, headers: { host: '127.0.0.1', origin, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const call = (name, method = 'GET', body, cookie, id = 'missing', origin) => routes[name][method](req(name, method, body, cookie, origin), { params: Promise.resolve({ id }) });
+  const data = async response => { assert.equal(response.status, 200, await response.clone().text()); assert.equal(response.headers.get('cache-control'), 'no-store'); return response.json(); };
+  try {
+    for (const [name, route] of Object.entries(routes)) {
+      for (const method of ['GET', 'POST', 'PATCH', 'DELETE'].filter(method => route[method])) {
+        assert.equal((await call(name, method, method === 'GET' || method === 'DELETE' ? undefined : {})).status, 401, name + ' ' + method);
+        assert.equal((await call(name, method, undefined, security.cookieName() + '=invalid')).status, 401, name + ' invalid cookie');
+      }
+    }
+    const suffix = randomBytes(8).toString('hex');
+    const passwordHash = await security.hashPassword('synthetic-owner-password');
+    const user = await db.user.create({ data: { name: 'Owner A', email: 'legacy-a-' + suffix + '@example.test', slug: 'a-' + suffix, passwordHash } });
+    const other = await db.user.create({ data: { name: 'Owner B', email: 'legacy-b-' + suffix + '@example.test', slug: 'b-' + suffix, passwordHash } });
+    const cookieA = security.cookieName() + '=' + security.issueSession(user.id, passwordHash);
+    const cookieB = security.cookieName() + '=' + security.issueSession(other.id, passwordHash);
+    const bancaB = await db.banca.create({ data: { userId: other.id, nome: 'B default', padrao: true } });
+    assert.equal((await data(await call('dashboard/all', 'GET', undefined, cookieA))).widgets.total_apostas, 0);
+    assert.equal((await call('financial/widgets', 'GET', undefined, cookieA)).status, 404);
+    assert.equal((await data(await call('bancas', 'GET', undefined, cookieA))).length, 0);
+    const createdBank = await call('bancas', 'POST', { nome: 'A default', valorInicial: 100, padrao: true }, cookieA);
+    assert.equal(createdBank.status, 201);
+    const bancaA = await createdBank.json();
+    assert.equal(bancaA.userId, user.id);
+    const bancaA2 = await db.banca.create({ data: { userId: user.id, nome: 'A second', padrao: false } });
+    const accountA = await db.contaBookmaker.findFirst({ where: { bancaId: bancaA.id } });
+    const accountA2 = await db.contaBookmaker.create({ data: { bancaId: bancaA2.id, nomeCasa: 'A2', saldoAtual: 70 } });
+    const accountB = await db.contaBookmaker.create({ data: { bancaId: bancaB.id, nomeCasa: 'B secret', saldoAtual: 90 } });
+    const betInput = { bancaId: bancaA.id, contaId: accountA.id, evento: 'Synthetic A', mercado: 'Synthetic market', odd: 2, stake: 10, status: 'GREEN' };
+    const ownBetResponse = await call('apostas', 'POST', betInput, cookieA);
+    assert.equal(ownBetResponse.status, 201);
+    const ownBet = await ownBetResponse.json();
+    const betB = await db.aposta.create({ data: { bancaId: bancaB.id, contaId: accountB.id, evento: 'B secret event', mercado: 'test', stake: 10, odd: 2, status: 'RED', lucroPrejuizo: -10 } });
+    await db.aposta.create({ data: { bancaId: bancaB.id, evento: 'B second', mercado: 'test' } });
+    const plan = await db.plan.create({ data: { name: 'Synthetic ' + suffix } });
+    await db.assinatura.create({ data: { userId: user.id, planId: plan.id } });
+    await db.userTelegram.create({ data: { userId: user.id, codigoVinculo: 'synthetic-link-code' } });
+    const me = await data(await call('me', 'GET', undefined, cookieA));
+    assert.equal(me.id, user.id);
+    assert.equal(me.assinatura.usages[0].consumed, 1);
+    assert.equal(Object.hasOwn(me.userTelegram, 'codigoVinculo'), false);
+    assert.equal((await data(await call('me', 'GET', undefined, cookieB))).id, other.id);
+    const banks = await data(await call('bancas', 'GET', undefined, cookieA));
+    assert(banks.every(bank => bank.id === bancaA.id || bank.id === bancaA2.id));
+    const bets = await data(await call('apostas', 'GET', undefined, cookieA));
+    assert.equal(bets.meta.total, 1);
+    assert(bets.data.every(bet => bet.banca.userId === user.id));
+    assert.equal((await data(await call('analysis/calendar', 'GET', undefined, cookieA))).stats.totalApostasMes, 1);
+    assert.equal((await data(await call('dashboard/all', 'GET', undefined, cookieA))).widgets.total_apostas, 1);
+    assert.equal((await data(await call('financial/widgets', 'GET', undefined, cookieA))).contas.every(account => account.id !== accountB.id), true);
+    for (const name of ['apostas', 'analysis/calendar', 'dashboard/all', 'financial/widgets']) {
+      const response = await routes[name].GET(req(name + '?banca_id=' + bancaB.id, 'GET', undefined, cookieA));
+      assert.equal(response.status, 404, name + ' cross-owner bank');
+    }
+    const before = await db.contaBookmaker.findMany({ where: { id: { in: [accountA.id, accountA2.id, accountB.id] } }, orderBy: { id: 'asc' } });
+    const bankBefore = await db.banca.findMany({ where: { id: { in: [bancaA.id, bancaA2.id, bancaB.id] } }, orderBy: { id: 'asc' } });
+    const betCount = await db.aposta.count();
+    const transactionCount = await db.transacao.count();
+    assert.equal((await call('apostas', 'POST', { ...betInput, bancaId: bancaB.id, contaId: accountB.id }, cookieA)).status, 404);
+    for (const account of [accountB, accountA2]) {
+      assert.equal((await call('apostas', 'POST', { ...betInput, contaId: account.id }, cookieA)).status, 404);
+      for (const tipo of ['APORTE', 'RETIRADA', 'DEPOSITO_CASA', 'SAQUE_CASA', 'AJUSTE']) {
+        assert.equal((await call('transacoes', 'POST', { bancaId: bancaA.id, contaId: account.id, tipo, valor: 1 }, cookieA)).status, 404, tipo + ' invalid account chain');
+      }
+    }
+    assert.equal((await call('transacoes', 'POST', { bancaId: bancaB.id, tipo: 'APORTE', valor: 1 }, cookieA)).status, 404);
+    for (const method of ['PATCH', 'DELETE']) {
+      assert.equal((await call('apostas/[id]', method, method === 'PATCH' ? { status: 'GREEN' } : undefined, cookieA, betB.id)).status, 404);
+      assert.equal((await call('apostas/[id]', method, method === 'PATCH' ? { status: 'GREEN' } : undefined, cookieB, ownBet.id)).status, 404);
+    }
+    assert.deepEqual(await db.contaBookmaker.findMany({ where: { id: { in: [accountA.id, accountA2.id, accountB.id] } }, orderBy: { id: 'asc' } }), before);
+    assert.deepEqual(await db.banca.findMany({ where: { id: { in: [bancaA.id, bancaA2.id, bancaB.id] } }, orderBy: { id: 'asc' } }), bankBefore);
+    assert.equal(await db.aposta.count(), betCount);
+    assert.equal(await db.transacao.count(), transactionCount);
+    const corrupt = await db.aposta.create({ data: { bancaId: bancaA.id, contaId: accountB.id, evento: 'Legacy bad link', mercado: 'test' } });
+    const dashboardForBookmaker = async name => data(await routes['dashboard/all'].GET(req(
+      'dashboard/all?banca_id=' + bancaA.id + '&bookmaker=' + encodeURIComponent(name), 'GET', undefined, cookieA)));
+    assert.equal((await dashboardForBookmaker(accountB.nomeCasa)).widgets.total_apostas, 0, 'A foreign account must not match a legacy crossed link');
+    assert.equal((await dashboardForBookmaker('Unknown synthetic bookmaker')).widgets.total_apostas, 0);
+    assert.equal((await dashboardForBookmaker(accountA.nomeCasa)).widgets.total_apostas, 1, 'An account of the selected bankroll must still match');
+    await db.contaBookmaker.update({ where: { id: accountB.id }, data: { nomeCasa: 'Renamed foreign bookmaker' } });
+    assert.equal((await dashboardForBookmaker(accountB.nomeCasa)).widgets.total_apostas, 0);
+    assert.equal((await dashboardForBookmaker('Renamed foreign bookmaker')).widgets.total_apostas, 0, 'Renaming a foreign account must not reveal its crossed bet');
+
+    for (const method of ['PATCH', 'DELETE']) assert.equal((await call('apostas/[id]', method, method === 'PATCH' ? { status: 'GREEN' } : undefined, cookieA, corrupt.id)).status, 404);
+    const sanitized = (await data(await call('apostas', 'GET', undefined, cookieA))).data.find(bet => bet.id === corrupt.id);
+    assert.equal(sanitized.conta, null);
+    assert.equal(sanitized.contaId, null);
+    for (const [name, route] of Object.entries(routes)) for (const method of ['POST', 'PATCH', 'DELETE'].filter(method => route[method])) {
+      assert.equal((await call(name, method, method === 'DELETE' ? undefined : {}, cookieA, ownBet.id, 'https://evil.example')).status, 403);
+      const missingOrigin = req(name, method, method === 'DELETE' ? undefined : {}, cookieA);
+      missingOrigin.headers.delete('origin');
+      assert.equal((await route[method](missingOrigin, { params: Promise.resolve({ id: ownBet.id }) })).status, 403);
+    }
+    assert.equal((await call('apostas/[id]', 'PATCH', { status: 'RED' }, cookieA, ownBet.id)).status, 200);
+    assert.equal((await call('apostas/[id]', 'DELETE', undefined, cookieA, ownBet.id)).status, 200);
+    assert.equal((await call('transacoes', 'POST', { bancaId: bancaA.id, contaId: accountA.id, tipo: 'AJUSTE', valor: 20 }, cookieA)).status, 201);
+    const tip = await call('tips', 'POST', { titulo: 'Shared ' + suffix, evento: 'Shared synthetic', mercado: 'test', oddRecomendada: 2 }, cookieA);
+    assert.equal(tip.status, 201);
+    const tipId = (await tip.json()).id;
+    assert((await data(await call('tips', 'GET', undefined, cookieB))).some(tip => tip.id === tipId));
+    assert.equal((await call('bancas', 'POST', { nome: 'No spoof', userId: other.id }, cookieA)).status, 400);
+    assert.equal((await call('apostas', 'POST', { ...betInput, ownerUserId: other.id }, cookieA)).status, 400);
+    for (const name of ['bancas', 'apostas', 'transacoes', 'tips']) {
+      const tooLarge = req(name, 'POST', { text: 'x'.repeat(17000) }, cookieA);
+      assert.equal((await routes[name].POST(tooLarge)).status, 413);
+    }
+    for (const name of ['bancas', 'apostas', 'transacoes', 'tips', 'apostas/[id]']) {
+      const method = name === 'apostas/[id]' ? 'PATCH' : 'POST';
+      const malformed = new NextRequest('http://127.0.0.1/api/internal/' + name, { method, headers: { host: '127.0.0.1', origin: 'http://127.0.0.1', 'content-type': 'application/json', cookie: cookieA }, body: '{' });
+      assert.equal((await routes[name][method](malformed, { params: Promise.resolve({ id: corrupt.id }) })).status, 400);
+      const unsupported = req(name, method, {}, cookieA);
+      unsupported.headers.set('content-type', 'text/plain');
+      assert.equal((await routes[name][method](unsupported, { params: Promise.resolve({ id: corrupt.id }) })).status, 415);
+    }
+    delete process.env.SESSION_SECRET;
+    for (const [name, route] of Object.entries(routes)) for (const method of ['GET', 'POST', 'PATCH', 'DELETE'].filter(method => route[method])) {
+      assert.equal((await call(name, method, undefined, cookieA)).status, 503, name + ' secret missing');
+    }
+  } finally {
+    await db.$disconnect();
+    Module._resolveFilename = resolve;
+    if (originalDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = originalDatabase;
+    process.env.SESSION_SECRET = originalSecret;
+  }
+});

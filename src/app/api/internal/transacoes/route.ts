@@ -1,32 +1,38 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, readJson, requireUser, sameOrigin } from "@/lib/auth/http";
+import { HttpError, objectInput } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
+export async function POST(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
+    sameOrigin(req);
+    const body = objectInput(await readJson(req), ["bancaId","contaId","tipo","valor","descricao"]) as Record<string, any>;
     const { bancaId, contaId, tipo, valor, descricao } = body;
 
     if (!bancaId || !tipo || !valor) {
-      return NextResponse.json(
+      return json(
         { error: "Banca, tipo e valor são obrigatórios" },
-        { status: 400 }
+        400
       );
     }
 
     const val = parseFloat(valor);
     if (isNaN(val) || val <= 0) {
-      return NextResponse.json({ error: "Valor inválido" }, { status: 400 });
+      return json({ error: "Valor inválido" }, 400);
     }
 
     // Executar movimentação contábil dentro de uma transação do banco
     const result = await prisma.$transaction(async (tx) => {
-      const banca = await tx.banca.findUnique({
-        where: { id: bancaId },
+      const banca = await tx.banca.findFirst({
+        where: { id: bancaId, userId: sessionUser.id },
       });
 
       if (!banca) {
-        throw new Error("Banca não encontrada");
+        throw new HttpError(404, "Banca não encontrada");
       }
+
+      if (contaId && !await tx.contaBookmaker.findFirst({ where: { id: contaId, bancaId }, select: { id: true } })) throw new HttpError(404, "Conta n\u00e3o encontrada");
 
       if (tipo === "APORTE") {
         await tx.banca.update({
@@ -35,7 +41,7 @@ export async function POST(req: Request) {
         });
       } else if (tipo === "RETIRADA") {
         if (banca.saldoBanco < val) {
-          throw new Error("Saldo insuficiente no banco para retirada");
+          throw new HttpError(400, "Saldo insuficiente no banco para retirada");
         }
         await tx.banca.update({
           where: { id: bancaId },
@@ -43,13 +49,13 @@ export async function POST(req: Request) {
         });
       } else if (tipo === "DEPOSITO_CASA") {
         if (!contaId) {
-          throw new Error("Casa de apostas deve ser selecionada para depósito");
+          throw new HttpError(400, "Casa de apostas deve ser selecionada para depósito");
         }
         if (banca.saldoBanco < val) {
-          throw new Error("Saldo insuficiente no banco para transferir para a casa");
+          throw new HttpError(400, "Saldo insuficiente no banco para transferir para a casa");
         }
         const conta = await tx.contaBookmaker.findUnique({ where: { id: contaId } });
-        if (!conta) throw new Error("Conta da casa não encontrada");
+        if (!conta) throw new HttpError(404, "Conta da casa não encontrada");
 
         await tx.banca.update({
           where: { id: bancaId },
@@ -61,12 +67,12 @@ export async function POST(req: Request) {
         });
       } else if (tipo === "SAQUE_CASA") {
         if (!contaId) {
-          throw new Error("Casa de apostas deve ser selecionada para saque");
+          throw new HttpError(400, "Casa de apostas deve ser selecionada para saque");
         }
         const conta = await tx.contaBookmaker.findUnique({ where: { id: contaId } });
-        if (!conta) throw new Error("Conta da casa não encontrada");
+        if (!conta) throw new HttpError(404, "Conta da casa não encontrada");
         if (conta.saldoAtual < val) {
-          throw new Error("Saldo insuficiente na casa de apostas para saque");
+          throw new HttpError(400, "Saldo insuficiente na casa de apostas para saque");
         }
 
         await tx.contaBookmaker.update({
@@ -90,7 +96,7 @@ export async function POST(req: Request) {
           });
         }
       } else {
-        throw new Error("Tipo de transação desconhecido");
+        throw new HttpError(400, "Tipo de transação desconhecido");
       }
 
       // Registrar o log da transação
@@ -107,12 +113,6 @@ export async function POST(req: Request) {
       return transacao;
     });
 
-    return NextResponse.json(result, { status: 201 });
-  } catch (error: any) {
-    console.error("Erro ao realizar transação:", error);
-    return NextResponse.json(
-      { error: error.message || "Erro ao realizar transação financeira" },
-      { status: 400 }
-    );
-  }
+    return json(result, 201);
+  });
 }

@@ -1,9 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, readJson, requireUser, sameOrigin } from "@/lib/auth/http";
+import { objectInput } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
-  try {
+export async function GET(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
     const bancas = await prisma.banca.findMany({
+      where: { userId: sessionUser.id },
       include: {
         contas: true,
         transacoes: true,
@@ -72,25 +76,24 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("Erro em /api/internal/bancas:", error);
-    return NextResponse.json({ error: "Erro ao listar bancas" }, { status: 500 });
-  }
+    return json(result);
+  });
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
+export async function POST(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
+    sameOrigin(req);
+    const body = objectInput(await readJson(req), ["nome","descricao","cor","valorInicial","unidadeEfetiva","padrao"]) as Record<string, any>;
     const { nome, descricao, cor, valorInicial, unidadeEfetiva, padrao } = body;
 
     if (!nome) {
-      return NextResponse.json({ error: "Nome da banca é obrigatório" }, { status: 400 });
+      return json({ error: "Nome da banca é obrigatório" }, 400);
     }
 
-    const user = await prisma.user.findFirst();
+    const user = sessionUser;
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
+      return json({ error: "Usuário não encontrado" }, 404);
     }
 
     const valorInit = parseFloat(valorInicial) || 1000.0;
@@ -136,9 +139,6 @@ export async function POST(req: Request) {
       ],
     });
 
-    return NextResponse.json(novaBanca, { status: 201 });
-  } catch (error) {
-    console.error("Erro ao criar banca:", error);
-    return NextResponse.json({ error: "Erro ao criar banca" }, { status: 500 });
-  }
+    return json(novaBanca, 201);
+  });
 }

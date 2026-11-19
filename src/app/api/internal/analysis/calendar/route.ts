@@ -1,8 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, requireUser } from "@/lib/auth/http";
+import { HttpError } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: Request) {
-  try {
+export async function GET(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
     const { searchParams } = new URL(req.url);
     const bancaId = searchParams.get("banca_id");
     const mesParam = searchParams.get("mes"); // Formato: YYYY-MM
@@ -20,6 +23,7 @@ export async function GET(req: Request) {
     const ultimoDia = new Date(ano, mes + 1, 0, 23, 59, 59, 999);
 
     const where: any = {
+      banca: { userId: sessionUser.id },
       dataJogo: {
         gte: primeiroDia,
         lte: ultimoDia,
@@ -29,6 +33,7 @@ export async function GET(req: Request) {
       },
     };
 
+    if (bancaId && !await prisma.banca.findFirst({ where: { id: bancaId, userId: sessionUser.id }, select: { id: true } })) throw new HttpError(404, "Banca n\u00e3o encontrada");
     if (bancaId) {
       where.bancaId = bancaId;
     }
@@ -116,7 +121,7 @@ export async function GET(req: Request) {
     const roiMes = totalStakeMes > 0 ? (totalLucroMes / totalStakeMes) * 100 : 0;
     const winRateMes = totalApostasMes > 0 ? (totalGreensMes / totalApostasMes) * 100 : 0;
 
-    return NextResponse.json({
+    return json({
       mes: `${ano}-${String(mes + 1).padStart(2, "0")}`,
       days,
       stats: {
@@ -131,8 +136,5 @@ export async function GET(req: Request) {
         totalApostasMes,
       },
     });
-  } catch (error) {
-    console.error("Erro em /api/internal/analysis/calendar:", error);
-    return NextResponse.json({ error: "Erro ao carregar calendário" }, { status: 500 });
-  }
+  });
 }
