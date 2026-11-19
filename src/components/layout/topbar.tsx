@@ -6,6 +6,7 @@ import { useBanca } from "@/components/providers/banca-provider";
 import { Bell, Eye, EyeOff, Coins, Sun, Moon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Badge } from "@/components/ui/badge";
+import { LogoutButton } from "@/components/channels/logout-button";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard Geral",
@@ -14,6 +15,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard/analysis": "Análise Gráfica & Relatórios",
   "/dashboard/update": "Apostas & Bilhetes",
   "/dashboard/tips": "Minhas Tips & Catálogo",
+  "/dashboard/channels": "Origens do Telegram",
   "/dashboard/tutorials": "Central de Tutoriais",
   "/dashboard/support": "Suporte & Atendimento",
   "/dashboard/profile": "Meu Perfil & Configurações",
@@ -52,6 +54,7 @@ export function Topbar() {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2 lg:gap-3">
+        <LogoutButton />
         {/* Toggle Mode: Moeda / Unidades / Privacidade */}
         <button
           onClick={toggleValorMode}

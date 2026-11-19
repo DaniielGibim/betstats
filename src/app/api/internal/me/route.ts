@@ -1,9 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, requireUser } from "@/lib/auth/http";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
-  try {
-    const user = await prisma.user.findFirst({
+export async function GET(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
+    const user = await prisma.user.findUnique({
+      where: { id: sessionUser.id },
       include: {
         telegramAccount: true,
         assinatura: {
@@ -15,7 +18,7 @@ export async function GET() {
     });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
+      return json({ error: "Usuário não encontrado" }, 404);
     }
 
     // Contar apostas feitas hoje para calcular o consumo
@@ -24,6 +27,7 @@ export async function GET() {
 
     const apostasHoje = await prisma.aposta.count({
       where: {
+        banca: { userId: sessionUser.id },
         createdAt: {
           gte: startOfToday,
         },
@@ -48,7 +52,6 @@ export async function GET() {
             name: user.telegramAccount.name,
             id_telegram: user.telegramAccount.telegramId,
             username: user.telegramAccount.username,
-            codigoVinculo: user.telegramAccount.codigoVinculo,
           }
         : null,
       assinatura: user.assinatura
@@ -83,9 +86,6 @@ export async function GET() {
         : null,
     };
 
-    return NextResponse.json(response);
-  } catch (error) {
-    console.error("Erro em /api/internal/me:", error);
-    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 });
-  }
+    return json(response);
+  });
 }

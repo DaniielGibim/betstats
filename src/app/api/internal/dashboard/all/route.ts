@@ -1,8 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, requireUser } from "@/lib/auth/http";
+import { HttpError } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: Request) {
-  try {
+export async function GET(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
     const { searchParams } = new URL(req.url);
     const bancaId = searchParams.get("banca_id");
     const startDateParam = searchParams.get("data_jogo[startDate]") || searchParams.get("startDate");
@@ -14,22 +17,23 @@ export async function GET(req: Request) {
     // Selecionar banca alvo
     let banca = null;
     if (bancaId) {
-      banca = await prisma.banca.findUnique({
-        where: { id: bancaId },
+      banca = await prisma.banca.findFirst({
+        where: { id: bancaId, userId: sessionUser.id },
         include: { contas: true },
       });
     } else {
       banca = await prisma.banca.findFirst({
-        where: { padrao: true },
+        where: { padrao: true, userId: sessionUser.id },
         include: { contas: true },
       });
       if (!banca) {
-        banca = await prisma.banca.findFirst({ include: { contas: true } });
+        banca = await prisma.banca.findFirst({ where: { userId: sessionUser.id }, include: { contas: true } });
       }
     }
 
+    if (bancaId && !banca) throw new HttpError(404, "Banca n\u00e3o encontrada");
     if (!banca) {
-      return NextResponse.json({
+      return json({
         widgets: {
           apostas_concluidas: 0,
           total_apostas: 0,
@@ -71,6 +75,7 @@ export async function GET(req: Request) {
     if (bookmakerParam && bookmakerParam !== "TODOS") {
       where.conta = {
         nomeCasa: bookmakerParam,
+        bancaId: banca.id,
       };
     }
 
@@ -171,7 +176,7 @@ export async function GET(req: Request) {
       { apostas: number; greens: number; lucro: number; stakeTotal: number }
     >();
     for (const a of resolvidas) {
-      const bm = a.conta?.nomeCasa || "Outras";
+      const bm = (a.conta?.bancaId === banca.id ? a.conta.nomeCasa : null) || "Outras";
       const cur = bookmakerMap.get(bm) || { apostas: 0, greens: 0, lucro: 0, stakeTotal: 0 };
       cur.apostas += 1;
       if (a.status === "GREEN" || a.status === "MEIO_GREEN") cur.greens += 1;
@@ -195,7 +200,7 @@ export async function GET(req: Request) {
       };
     });
 
-    return NextResponse.json({
+    return json({
       widgets: {
         apostas_concluidas: apostasConcluidas,
         total_apostas: totalApostas,
@@ -216,8 +221,5 @@ export async function GET(req: Request) {
       sportsSummary,
       bookmakerSummary,
     });
-  } catch (error) {
-    console.error("Erro em /api/internal/dashboard/all:", error);
-    return NextResponse.json({ error: "Erro ao gerar dashboard" }, { status: 500 });
-  }
+  });
 }

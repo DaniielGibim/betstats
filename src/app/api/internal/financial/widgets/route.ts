@@ -1,31 +1,36 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, requireUser } from "@/lib/auth/http";
+import { HttpError } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: Request) {
-  try {
+export async function GET(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
     const { searchParams } = new URL(req.url);
     const bancaId = searchParams.get("banca_id");
 
     let banca = null;
     if (bancaId) {
-      banca = await prisma.banca.findUnique({
-        where: { id: bancaId },
+      banca = await prisma.banca.findFirst({
+        where: { id: bancaId, userId: sessionUser.id },
         include: { contas: true, transacoes: true, apostas: true },
       });
     } else {
       banca = await prisma.banca.findFirst({
-        where: { padrao: true },
+        where: { padrao: true, userId: sessionUser.id },
         include: { contas: true, transacoes: true, apostas: true },
       });
       if (!banca) {
         banca = await prisma.banca.findFirst({
+          where: { userId: sessionUser.id },
           include: { contas: true, transacoes: true, apostas: true },
         });
       }
     }
 
+    if (bancaId && !banca) throw new HttpError(404, "Banca n\u00e3o encontrada");
     if (!banca) {
-      return NextResponse.json({ error: "Nenhuma banca encontrada" }, { status: 404 });
+      return json({ error: "Nenhuma banca encontrada" }, 404);
     }
 
     const aportesTrans = banca.transacoes.filter((t) => t.tipo === "APORTE");
@@ -77,9 +82,6 @@ export async function GET(req: Request) {
       transacoesRecentes: banca.transacoes.slice(-10).reverse(),
     };
 
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error("Erro em /api/internal/financial/widgets:", error);
-    return NextResponse.json({ error: "Erro ao buscar dados financeiros" }, { status: 500 });
-  }
+    return json(data);
+  });
 }

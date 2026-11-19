@@ -4,7 +4,7 @@ BetStats é uma aplicação web para acompanhamento de bancas, movimentações f
 
 ## Estado atual e limites
 
-- As rotas em `src/app/api/internal` são interfaces internas sem autenticação ou isolamento de usuários. Não use dados reais, credenciais ou informações pessoais.
+- A autenticação e o isolamento das rotas internas estão sob revisão nesta branch; não exponha a aplicação a terceiros até concluir os gates de segurança.
 - Não há declaração de produção, disponibilidade pública ou implantação aberta neste repositório.
 - A persistência usa SQLite local. Em ambientes de desenvolvimento e CI, use um banco vazio e efêmero; não versione arquivos de banco e não execute o seed observado neste histórico.
 - Licenciamento, proveniência e avisos de terceiros são tratados em documentos próprios e ainda dependem de decisão de publicação.
@@ -16,7 +16,7 @@ BetStats é uma aplicação web para acompanhamento de bancas, movimentações f
 
 ## Desenvolvimento local
 
-1. Crie uma configuração local de ambiente a partir de `.env.example`, mantendo-a fora do Git. Use um caminho SQLite local vazio em `DATABASE_URL`.
+1. Copie `.env.example` para `.env.local` (ignorado pelo Git). Use um caminho SQLite vazio em `DATABASE_URL`, gere um `SESSION_SECRET` aleatório de pelo menos 32 bytes e mantenha `ALLOW_PUBLIC_REGISTRATION=false` salvo se o cadastro público for intencional.
 2. Instale exatamente as dependências do lockfile:
 
 ```bash

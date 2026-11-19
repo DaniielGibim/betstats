@@ -15,6 +15,7 @@ import {
   Headphones,
   User,
   X,
+  Radio,
 } from "lucide-react";
 
 export function BottomNav() {
@@ -31,6 +32,7 @@ export function BottomNav() {
   const moreItems = [
     { label: "Bancas", href: "/dashboard/bancas", icon: Layers },
     { label: "Minhas Tips", href: "/dashboard/tips", icon: Sparkles },
+    { label: "Origens Telegram", href: "/dashboard/channels", icon: Radio },
     { label: "Tutoriais", href: "/dashboard/tutorials", icon: BookOpen },
     { label: "Suporte", href: "/dashboard/support", icon: Headphones },
     { label: "Perfil", href: "/dashboard/profile", icon: User },

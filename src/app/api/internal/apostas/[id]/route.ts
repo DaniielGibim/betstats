@@ -1,23 +1,27 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, readJson, requireUser, sameOrigin } from "@/lib/auth/http";
+import { HttpError, objectInput } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 import { calcularLucroPrejuizo } from "@/lib/calculations";
 
 export async function PATCH(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
+    sameOrigin(req);
     const { id } = await params;
-    const body = await req.json();
+    const body = objectInput(await readJson(req), ["status","odd","stake","evento","mercado","tipster","esporte"]) as Record<string, any>;
     const { status, odd, stake, evento, mercado, tipster, esporte } = body;
 
-    const apostaExistente = await prisma.aposta.findUnique({
-      where: { id },
+    const apostaExistente = await prisma.aposta.findFirst({
+      where: { id, banca: { userId: sessionUser.id } },
       include: { conta: true },
     });
 
     if (!apostaExistente) {
-      return NextResponse.json({ error: "Aposta não encontrada" }, { status: 404 });
+      return json({ error: "Aposta não encontrada" }, 404);
     }
 
     const newStatus = status !== undefined ? status : apostaExistente.status;
@@ -27,6 +31,7 @@ export async function PATCH(
 
     // Ajustar saldo da casa se o status ou lucro mudou
     const updated = await prisma.$transaction(async (tx) => {
+      if (apostaExistente.contaId && !await tx.contaBookmaker.findFirst({ where: { id: apostaExistente.contaId, bancaId: apostaExistente.bancaId, banca: { userId: sessionUser.id } }, select: { id: true } })) throw new HttpError(404, "Conta n\u00e3o encontrada");
       // Reverter impacto anterior se existia
       if (apostaExistente.contaId && apostaExistente.lucroPrejuizo !== null) {
         await tx.contaBookmaker.update({
@@ -69,26 +74,26 @@ export async function PATCH(
       });
     });
 
-    return NextResponse.json(updated);
-  } catch (error) {
-    console.error("Erro ao atualizar aposta:", error);
-    return NextResponse.json({ error: "Erro ao atualizar aposta" }, { status: 500 });
-  }
+    return json(updated);
+  });
 }
 
 export async function DELETE(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
+    sameOrigin(req);
     const { id } = await params;
-    const aposta = await prisma.aposta.findUnique({ where: { id } });
+    const aposta = await prisma.aposta.findFirst({ where: { id, banca: { userId: sessionUser.id } } });
 
     if (!aposta) {
-      return NextResponse.json({ error: "Aposta não encontrada" }, { status: 404 });
+      return json({ error: "Aposta não encontrada" }, 404);
     }
 
     await prisma.$transaction(async (tx) => {
+      if (aposta.contaId && !await tx.contaBookmaker.findFirst({ where: { id: aposta.contaId, bancaId: aposta.bancaId, banca: { userId: sessionUser.id } }, select: { id: true } })) throw new HttpError(404, "Conta n\u00e3o encontrada");
       // Se tinha lucro no bookmaker, reverte
       if (aposta.contaId && aposta.lucroPrejuizo !== null) {
         await tx.contaBookmaker.update({
@@ -103,9 +108,6 @@ export async function DELETE(
       await tx.aposta.delete({ where: { id } });
     });
 
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Erro ao deletar aposta:", error);
-    return NextResponse.json({ error: "Erro ao deletar aposta" }, { status: 500 });
-  }
+    return json({ success: true });
+  });
 }

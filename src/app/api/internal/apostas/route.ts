@@ -1,9 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { handle, json, readJson, requireUser, sameOrigin } from "@/lib/auth/http";
+import { HttpError, objectInput } from "@/lib/auth/security";
 import { prisma } from "@/lib/prisma";
 import { calcularLucroPrejuizo } from "@/lib/calculations";
 
-export async function GET(req: Request) {
-  try {
+export async function GET(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
     const { searchParams } = new URL(req.url);
     const bancaId = searchParams.get("banca_id");
     const status = searchParams.get("status");
@@ -14,7 +17,8 @@ export async function GET(req: Request) {
     const limit = parseInt(searchParams.get("limit") || "20", 10);
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = { banca: { userId: sessionUser.id } };
+    if (bancaId && !await prisma.banca.findFirst({ where: { id: bancaId, userId: sessionUser.id }, select: { id: true } })) throw new HttpError(404, "Banca n\u00e3o encontrada");
     if (bancaId) where.bancaId = bancaId;
     if (status && status !== "TODOS") where.status = status;
     if (esporte && esporte !== "TODOS") where.esporte = esporte;
@@ -43,8 +47,10 @@ export async function GET(req: Request) {
       prisma.aposta.count({ where }),
     ]);
 
-    return NextResponse.json({
-      data: apostas,
+    return json({
+      // Do not expose a foreign account through an inconsistent legacy link.
+      data: apostas.map(aposta => aposta.conta && aposta.conta.bancaId !== aposta.bancaId
+        ? { ...aposta, contaId: null, conta: null } : aposta),
       meta: {
         total,
         page,
@@ -52,15 +58,14 @@ export async function GET(req: Request) {
         totalPages: Math.ceil(total / limit),
       },
     });
-  } catch (error) {
-    console.error("Erro em /api/internal/apostas:", error);
-    return NextResponse.json({ error: "Erro ao listar apostas" }, { status: 500 });
-  }
+  });
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
+export async function POST(req: NextRequest) {
+  return handle(async () => {
+    const sessionUser = await requireUser(req);
+    sameOrigin(req);
+    const body = objectInput(await readJson(req), ["bancaId","contaId","esporte","evento","mercado","odd","stake","status","tipster","dataJogo","observacoes"]) as Record<string, any>;
     const {
       bancaId,
       contaId,
@@ -76,9 +81,9 @@ export async function POST(req: Request) {
     } = body;
 
     if (!bancaId || !evento || !mercado || !odd || !stake) {
-      return NextResponse.json(
+      return json(
         { error: "Banca, evento, mercado, odd e stake são obrigatórios" },
-        { status: 400 }
+        400
       );
     }
 
@@ -87,6 +92,8 @@ export async function POST(req: Request) {
     const lucro = calcularLucroPrejuizo(numericStake, numericOdd, status);
 
     const aposta = await prisma.$transaction(async (tx) => {
+      if (!await tx.banca.findFirst({ where: { id: bancaId, userId: sessionUser.id }, select: { id: true } })) throw new HttpError(404, "Banca n\u00e3o encontrada");
+      if (contaId && !await tx.contaBookmaker.findFirst({ where: { id: contaId, bancaId }, select: { id: true } })) throw new HttpError(404, "Conta n\u00e3o encontrada");
       const novaAposta = await tx.aposta.create({
         data: {
           bancaId,
@@ -122,9 +129,6 @@ export async function POST(req: Request) {
       return novaAposta;
     });
 
-    return NextResponse.json(aposta, { status: 201 });
-  } catch (error) {
-    console.error("Erro ao criar aposta:", error);
-    return NextResponse.json({ error: "Erro ao criar aposta" }, { status: 500 });
-  }
+    return json(aposta, 201);
+  });
 }
