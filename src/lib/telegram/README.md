@@ -30,8 +30,18 @@ automaticamente por perda de acesso ou revogação pode ser retomada quando a
 mesma tupla de aprovação (bot, canal, dono e referência), o ID canônico do
 canal e a função de administrador do bot forem confirmados. A retomada aguarda
 lote vazio, preserva o vínculo e os dados existentes e grava um novo corte por
-cursor/data para não importar mensagens anteriores. Pausas manuais, fontes
-removidas e pausas legadas ambíguas continuam inativas.
+cursor/data para não importar mensagens anteriores.
+
+Para uma fonte já ativada e pausada manualmente, o dono solicita a retomada
+na tela Origens do Telegram ou com `PATCH /api/internal/sources/:id` e
+`{"action":"resume"}`. A API retorna `202` e `resume_requested`. O pedido
+pode ser cancelado com `{"action":"pause"}`. O worker exige lote vazio
+observado após o pedido, aprovação exata, confirmação do ID canônico e
+acesso administrativo do mesmo bot que ativou a fonte. Enquanto essas
+condições não forem atendidas, a fonte permanece inativa. A retomada
+preserva o cursor, os recibos, o cadastro e as mensagens já coletadas,
+registrando o novo corte em `CollectionRun`. Fontes removidas e rascunhos
+sem ativação anterior não podem ser retomados.
 
 O primeiro ciclo drena a fila global antes de habilitar fontes. O worker
 ativa novos rascunhos após um lote vazio, sem descartar mensagens das fontes
@@ -57,7 +67,7 @@ delimitados, DATA marca a mensagem para revisão.
 404 para fonte alheia, removida ou desconhecida. A listagem inclui tamb?m
 `collector` com `status` (`disabled`, `running`, `degraded` ou `stopped`),
 `lastSuccessAt` e `lastErrorCode`. O estado por fonte inclui `status`
-(`disabled`, `awaiting_approval`, `awaiting_bot_access`, `paused`, `offline`, `degraded` ou
+(`disabled`, `awaiting_approval`, `awaiting_bot_access`, `awaiting_resume`, `paused`, `offline`, `degraded` ou
 `connected`), `errorCode`, `activatedAt`, `lastCollectedAt` e
 `lastPollSuccessAt`. Códigos podem ser nulos e datas são ISO ou nulas.
 `connected` indica que a fonte está ativa e o worker tem lease válido.
@@ -80,3 +90,7 @@ Testes offline: `node --test src/lib/telegram/bot-polling.test.cjs`.
 A integração SQLite usa `AUTH_TEST_CLIENT` e `AUTH_TEST_DATABASE_URL` apontando
 para cliente e banco descartáveis gerados a partir do schema atual. O teste
 exige caminho `mission6-tests-<hex>/auth-test.sqlite` e usa somente fixtures.
+
+No ensaio real da Missão 6, dois posts de texto simples foram coletados
+com a fila inicial vazia. Fila antiga não vazia, edições, mídia e reentrega
+forçada ainda aguardam demonstração com o Telegram real.

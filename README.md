@@ -46,9 +46,17 @@ referência de autorização. O worker confere o ID canônico do canal e a funç
 de administrador do bot e espera um lote vazio antes de reativar. O cadastro, o
 marco original de ativação, o cursor e os recibos são preservados. A coleta
 retoma com updates acima do cursor da retomada e posts criados a partir do
-segundo seguinte, inclusive para edições. Pausas manuais, remoções e pausas
-legadas sem evidência suficiente de terem sido feitas pelo worker permanecem
-fora da coleta.
+segundo seguinte, inclusive para edições.
+
+Em Origens do Telegram, o dono pode solicitar a retomada de uma fonte que já
+estava ativada e foi pausada manualmente. Ela fica pendente até o worker
+observar um lote vazio após o pedido e refazer as mesmas verificações. O dono
+pode cancelar o pedido enquanto estiver pendente. A retomada manual preserva
+o histórico e cria um novo corte de coleta. Fontes removidas não são elegíveis.
+
+O ensaio real da Missão 6 recebeu dois posts de texto simples com a fila
+inicial vazia. O descarte de uma fila antiga não vazia, as edições, a mídia e
+a reentrega forçada ainda não foram demonstrados com o Telegram real.
 
 Na inicialização, falhas transitórias de `getMe` recebem até cinco tentativas
 com espera exponencial de 1, 2, 4 e 8 segundos. O worker respeita `Retry-After`

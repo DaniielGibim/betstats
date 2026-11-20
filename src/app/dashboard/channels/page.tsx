@@ -5,7 +5,7 @@ import { AlertCircle, Clock3, Loader2, Radio, RefreshCw, Server } from "lucide-r
 import { SourceCard } from "@/components/channels/source-card";
 import { SourceForm } from "@/components/channels/source-form";
 import { CollectorStatusBadge } from "@/components/channels/source-status";
-import { friendlyErrorCode, normalizeSourcesPayload, type CollectorState, type TelegramSource } from "@/components/channels/types";
+import { friendlyErrorCode, normalizeSourcesPayload, type CollectorState, type SourceAction, type TelegramSource } from "@/components/channels/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -99,7 +99,7 @@ export default function ChannelsPage() {
     }
   }
 
-  async function actOnSource(source: TelegramSource, action: "pause" | "remove") {
+  async function actOnSource(source: TelegramSource, action: SourceAction) {
     if (action === "remove" && !window.confirm(`Remover @${source.username} das suas origens?`)) return;
     setBusyId(source.id);
     setError(null);
@@ -108,10 +108,14 @@ export default function ChannelsPage() {
       const response = await fetch(`/api/internal/sources/${encodeURIComponent(source.id)}`, {
         method: action === "remove" ? "DELETE" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        ...(action === "pause" ? { body: JSON.stringify({ action: "pause" }) } : {}),
+        ...(action !== "remove" ? { body: JSON.stringify({ action }) } : {}),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      setNotice(action === "remove" ? "Origem removida." : "Origem pausada.");
+      setNotice({
+        remove: "Origem removida.",
+        pause: "Origem pausada.",
+        resume: "Retomada solicitada. O coletor verificará a autorização e o acesso ao canal.",
+      }[action]);
       await loadSources(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível atualizar a origem.");

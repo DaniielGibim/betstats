@@ -5,6 +5,7 @@ const CONNECTION_STATUS: Record<ConnectionStatus, { label: string; variant: "gre
   disabled: { label: "Desabilitado", variant: "secondary" },
   awaiting_approval: { label: "Aguardando aprovação", variant: "yellow" },
   awaiting_bot_access: { label: "Aguardando acesso do bot", variant: "yellow" },
+  awaiting_resume: { label: "Retomada pendente", variant: "yellow" },
   paused: { label: "Pausado", variant: "secondary" },
   offline: { label: "Offline", variant: "outline" },
   degraded: { label: "Conexão degradada", variant: "yellow" },

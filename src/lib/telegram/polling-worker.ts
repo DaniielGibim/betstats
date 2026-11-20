@@ -54,7 +54,7 @@ export function createPollCycle(api: BotApi, lease: PollingLease, approvals: Rea
     checkedAccessAt = Date.now();
   }
 
-  async function activateSources(signal: AbortSignal) {
+  async function activateSources(signal: AbortSignal, queueDrainedAt: Date) {
     if (Date.now() - checkedDraftsAt < RECHECK_MS) return;
     for (const approval of approvals.values()) {
       signal.throwIfAborted();
@@ -64,7 +64,7 @@ export function createPollCycle(api: BotApi, lease: PollingLease, approvals: Rea
         const channel = await api.getChannel(approval.chatId, signal);
         const admin = await hasAccess(approval.chatId, signal);
         signal.throwIfAborted();
-        if (admin) await lease.activate(approval, channel);
+        if (admin) await lease.activate(approval, channel, queueDrainedAt);
         else if (channel.username) await lease.awaitBotAccess(approval, channel.username);
       } catch (error) {
         if (!(error instanceof BotError) || error.code !== 'access_lost') throw error;
@@ -109,7 +109,7 @@ export function createPollCycle(api: BotApi, lease: PollingLease, approvals: Rea
 
     // Before the first empty response every queued update is dropped from ingestion.
     if (!bootstrap || !updates.length) await lease.success(coverageGap);
-    if (!updates.length) await activateSources(signal);
+    if (!updates.length) await activateSources(signal, receivedAt);
   };
 }
 

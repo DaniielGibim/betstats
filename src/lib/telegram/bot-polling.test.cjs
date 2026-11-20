@@ -166,6 +166,7 @@ test('SQLite polling fences the worker and atomically checkpoints authorized fut
     await assert.rejects(createPollingStore(db, botId).acquire(), /lease_lost/);
     let allowed = false;
     let canonicalChannel = true;
+    let duringAccessCheck;
     let updates = [];
     const offsets = [];
     const api = {
@@ -177,6 +178,9 @@ test('SQLite polling fences the worker and atomically checkpoints authorized fut
       async assertAdmin(id, who) {
         assert.equal(id, chatId);
         assert.equal(who, botId);
+        const action = duringAccessCheck;
+        duringAccessCheck = undefined;
+        await action?.();
         if (!allowed) throw new BotError('access_lost');
       },
       async getUpdates(cursor) { offsets.push(cursor); return updates; },
@@ -402,19 +406,95 @@ test('SQLite polling fences the worker and atomically checkpoints authorized fut
     await sourceService.change(owner.id, registration.id, 'pause');
     await resume(approvals);
     await assertPaused();
-    await sourceService.change(owner.id, registration.id, 'remove');
+    const requestResume = () => sourceService.change(owner.id, registration.id, 'resume');
+    const requestState = () => db.sourceRegistration.findUniqueOrThrow({ where: { id: registration.id } });
+    const readMessages = () => db.sourceMessage.findMany({ where: { dataSourceId: source.id }, orderBy: { id: 'asc' } });
+    const runs = () => db.collectionRun.findMany({ where: { dataSourceId: source.id }, orderBy: { id: 'asc' } });
+    const receipts = () => db.telegramUpdateReceipt.findMany({ where: { botUserId: botId }, orderBy: { updateId: 'asc' } });
+    const originalMessages = await readMessages();
+    await assert.rejects(sourceService.change(other.id, registration.id, 'resume'), { status: 404 });
+    assert.equal((await requestResume()).status, 'resume_requested');
+    const originalRequest = await requestState();
+    assert.equal((await requestResume()).status, 'resume_requested');
+    assert.deepEqual(await requestState(), originalRequest);
+    const pendingResume = await sourceConnectionSnapshot(db, owner.id, [originalRequest], { TELEGRAM_BOT_USER_ID: botId });
+    assert.equal(pendingResume.sources[0].connection.status, 'awaiting_resume');
+    await assertPaused();
+
+    await resume(new Map([[chatId, { ...approval, authorizationRef: 'test:mismatch' }]]));
+    await assertPaused();
+    canonicalChannel = false;
     await resume(approvals);
     await assertPaused();
-    assert((await readSource()).removedAt);
-    assert.equal(await db.collectionRun.count({ where: { dataSourceId: source.id, status: 'reactivated' } }), 2);
+    canonicalChannel = true;
+    allowed = false;
+    await resume(approvals);
+    await assertPaused();
+    allowed = true;
 
-    await db.telegramUpdateReceipt.update({ where: { botUserId_updateId: { botUserId: botId, updateId: 22n } },
+    updates = [post(23, 17, transitionSecond + 1)];
+    await resume(approvals);
+    await assertPaused();
+    assert.equal((await receipt(23n)).outcome, 'ignored');
+    updates = [];
+    duringAccessCheck = async () => {
+      await sourceService.change(owner.id, registration.id, 'pause');
+      await requestResume();
+    };
+    await resume(approvals);
+    await assertPaused();
+
+    const originalRuns = await runs();
+    const originalReceipts = await receipts();
+    const beforeManualResume = await readSource();
+    await require('node:timers/promises').setTimeout(5);
+    await resume(approvals);
+    assert.equal((await requestState()).status, 'active');
+    const manualRestored = await readSource();
+    assert.equal(manualRestored.active, true);
+    for (const field of ['id', 'ownerUserId', 'externalChatId', 'authorizationRef', 'authorizedAt', 'activatedAt', 'activationUpdateId']) {
+      assert.deepEqual(manualRestored[field], beforeManualResume[field], field);
+    }
+    assert.equal((await lease.state()).lastConfirmedUpdateId, 23n);
+    assert.deepEqual(await receipts(), originalReceipts);
+    assert.deepEqual(await readMessages(), originalMessages);
+    const runsAfterResume = await runs();
+    assert.equal(runsAfterResume.length, originalRuns.length + 1);
+    assert.deepEqual(runsAfterResume.filter(run => run.lastUpdateId !== 23n), originalRuns);
+    const manualRun = runsAfterResume.find(run => run.status === 'reactivated' && run.lastUpdateId === 23n);
+    const manualSecond = Math.floor(manualRun.startedAt.getTime() / 1000);
+    await require('node:timers/promises').setTimeout(Math.max(0, (manualSecond + 1) * 1000 - Date.now()) + 5);
+    updates = [
+      post(24, 15, transitionSecond + 1, { edit_date: manualSecond + 1 }, true),
+      post(25, 18, manualSecond),
+      post(26, 19, manualSecond + 1),
+    ];
+    await resume(approvals);
+    await resume(approvals);
+    assert.equal((await receipt(24n)).outcome, 'ineligible');
+    assert.equal((await receipt(25n)).outcome, 'ineligible');
+    assert.equal((await receipt(26n)).outcome, 'created');
+    const afterFreshPost = await readMessages();
+    assert.equal(afterFreshPost.length, originalMessages.length + 1);
+    assert.deepEqual(afterFreshPost.filter(row => originalMessages.some(original => original.id === row.id)), originalMessages);
+
+    await sourceService.change(owner.id, registration.id, 'pause');
+    await requestResume();
+    await sourceService.change(owner.id, registration.id, 'remove');
+    updates = [];
+    await resume(approvals);
+    await assertPaused();
+    await assert.rejects(requestResume(), { status: 404 });
+    assert((await readSource()).removedAt);
+    assert.equal(await db.collectionRun.count({ where: { dataSourceId: source.id, status: 'reactivated' } }), 3);
+
+    await db.telegramUpdateReceipt.update({ where: { botUserId_updateId: { botUserId: botId, updateId: 26n } },
       data: { processedAt: new Date(Date.now() - 7 * 86_400_000) } });
     const priorCalls = offsets.length;
     await assert.rejects(poll(signal), /sequence_uncertain/);
     assert.equal(offsets.length, priorCalls, 'An obsolete offset must not be sent to Telegram');
     await lease.release();
-    await assert.rejects(lease.consume({ updateId: 23n }, { bootstrap: false }), /lease_lost/);
+    await assert.rejects(lease.consume({ updateId: 27n }, { bootstrap: false }), /lease_lost/);
     const corrected = await store.acquire();
     await corrected.release();
   } finally {

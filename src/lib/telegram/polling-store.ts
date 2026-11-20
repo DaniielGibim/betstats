@@ -124,7 +124,7 @@ export function createPollingStore(db: PrismaClient, botUserId: string, leaseOwn
           status: 'pending_resolution', resolvedSourceId: null,
         }, data: { status: 'pending_authorization' } }));
       },
-      async activate(approval: Approval, channel: { username: string | null; title: string | null }) {
+      async activate(approval: Approval, channel: { username: string | null; title: string | null }, queueDrainedAt: Date) {
         if (approval.botId !== botUserId) return;
         await transaction(async tx => {
           const row = await tx.telegramPollingState.findUniqueOrThrow({ where: { botUserId } });
@@ -138,7 +138,9 @@ export function createPollingStore(db: PrismaClient, botUserId: string, leaseOwn
             if (existing.active || existing.removedAt || existing.chatType !== 'channel' || !existing.activatedAt
               || existing.activationUpdateId === null || !matchesApproval(existing, approval)
               || !registration || registration.platform !== 'telegram' || registration.userId !== approval.ownerUserId
-              || !['paused_by_worker', 'inactive'].includes(registration.status)) return;
+              || !['paused_by_worker', 'inactive', 'resume_requested'].includes(registration.status)) return;
+            // The manual request must predate both the empty response and the access check.
+            if (registration.status === 'resume_requested' && registration.updatedAt >= queueDrainedAt) return;
 
             const activation = await tx.collectionRun.findFirst({
               where: { dataSourceId: existing.id, botUserId, status: 'activated' },

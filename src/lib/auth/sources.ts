@@ -49,12 +49,24 @@ export function createSourceService(db: SourceDatabase) {
         throw error;
       }
     },
-    async change(userId: string, id: string, action: 'pause' | 'remove') {
+    async change(userId: string, id: string, action: 'pause' | 'resume' | 'remove') {
       owner(userId);
       if (!id || id.length > 128) throw new HttpError(400, 'Invalid source id.');
       return db.$transaction(async tx => {
         const row = await tx.sourceRegistration.findFirst({ where: { id, userId, status: { not: 'removed' } } });
         if (!row) throw new HttpError(404, 'Source not found.');
+        if (action === 'resume') {
+          if (row.status === 'resume_requested') return row;
+          const changed = await tx.sourceRegistration.updateMany({
+            where: { id, userId, platform: 'telegram', status: 'inactive', resolvedSource: { is: {
+              platform: 'telegram', chatType: 'channel', active: false, removedAt: null,
+              activatedAt: { not: null }, activationUpdateId: { not: null },
+            } } },
+            data: { status: 'resume_requested' },
+          });
+          if (changed.count !== 1) throw new HttpError(409, 'Only previously activated, manually paused sources can be resumed.');
+          return { ...row, status: 'resume_requested' };
+        }
         const status = action === 'remove' ? 'removed' : 'inactive';
         if (row.resolvedSourceId) {
           const changed = await tx.dataSource.updateMany({ where: { id: row.resolvedSourceId, ownerUserId: userId, removedAt: null }, data: { active: false, ...(action === 'remove' ? { removedAt: new Date() } : {}) } });

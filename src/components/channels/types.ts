@@ -1,4 +1,4 @@
-export type ConnectionStatus = "disabled" | "awaiting_approval" | "awaiting_bot_access" | "paused" | "offline" | "degraded" | "connected";
+export type ConnectionStatus = "disabled" | "awaiting_approval" | "awaiting_bot_access" | "awaiting_resume" | "paused" | "offline" | "degraded" | "connected";
 export type CollectorStatus = "disabled" | "running" | "degraded" | "stopped";
 
 export interface CollectorState {
@@ -7,11 +7,14 @@ export interface CollectorState {
   lastErrorCode: string | null;
 }
 
+export type SourceAction = "pause" | "resume" | "remove";
+
 export interface TelegramSource {
   id: string;
   username: string;
   title?: string | null;
   active: boolean;
+  canResume: boolean;
   activatedAt: string | null;
   connectionStatus: ConnectionStatus;
   lastCollectedAt: string | null;
@@ -23,6 +26,7 @@ const CONNECTION_STATUSES = new Set<ConnectionStatus>([
   "disabled",
   "awaiting_approval",
   "awaiting_bot_access",
+  "awaiting_resume",
   "paused",
   "offline",
   "degraded",
@@ -70,6 +74,7 @@ export function normalizeSource(value: unknown): TelegramSource | null {
         ? source.titleSnapshot
         : null,
     active,
+    canResume: source.platform === "telegram" && source.status === "inactive" && !!connection?.activatedAt,
     activatedAt: nullableString(connection?.activatedAt),
     connectionStatus,
     lastCollectedAt: nullableString(connection?.lastCollectedAt),

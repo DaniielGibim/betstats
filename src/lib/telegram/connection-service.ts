@@ -46,7 +46,8 @@ export async function sourceConnectionSnapshot(db: PrismaClient, userId: string,
     const errorCode = safeError(row?.collectionRuns[0]?.errorCode)
       ?? (row?.active ? collectorError : awaitingAccess ? 'access_lost' : null);
     const status = source.platform !== 'telegram' || !botUserId ? 'disabled'
-      : source.status === 'inactive' || (row && !row.active) ? 'paused'
+      : source.status === 'resume_requested' ? 'awaiting_resume'
+        : source.status === 'inactive' || (row && !row.active) ? 'paused'
         : awaitingAccess ? 'awaiting_bot_access'
           : !row ? source.resolvedSourceId ? 'offline' : 'awaiting_approval'
             : !activeWorker ? 'offline'

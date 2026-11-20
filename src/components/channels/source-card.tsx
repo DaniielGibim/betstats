@@ -1,15 +1,15 @@
 "use client";
 
-import { Activity, AlertCircle, CalendarCheck, LockKeyhole, MessageCircle, Pause, Radio, Trash2 } from "lucide-react";
+import { Activity, AlertCircle, CalendarCheck, LockKeyhole, MessageCircle, Pause, Play, Radio, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SourceStatusBadge } from "./source-status";
-import { friendlyErrorCode, type TelegramSource } from "./types";
+import { friendlyErrorCode, type SourceAction, type TelegramSource } from "./types";
 
 interface SourceCardProps {
   source: TelegramSource;
   busy?: boolean;
-  onAction: (source: TelegramSource, action: "pause" | "remove") => void;
+  onAction: (source: TelegramSource, action: SourceAction) => void;
 }
 
 export function SourceCard({ source, busy = false, onAction }: SourceCardProps) {
@@ -43,8 +43,10 @@ export function SourceCard({ source, busy = false, onAction }: SourceCardProps) 
           {lastError && <p role="alert" className="flex items-start gap-2 text-red-600 dark:text-red-400"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>Último erro: {lastError}</span></p>}
         </div>
         <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-          {source.active ? (
-            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onAction(source, "pause")} className="gap-1.5"><Pause className="h-3.5 w-3.5" /> Pausar</Button>
+          {source.active || source.connectionStatus === "awaiting_resume" ? (
+            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onAction(source, "pause")} className="gap-1.5"><Pause className="h-3.5 w-3.5" /> {source.active ? "Pausar" : "Cancelar retomada"}</Button>
+          ) : source.canResume ? (
+            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onAction(source, "resume")} className="gap-1.5"><Play className="h-3.5 w-3.5" /> Solicitar retomada</Button>
           ) : (
             <Button type="button" size="sm" disabled title="Ativação indisponível até a resolução e autorização do canal" className="gap-1.5"><LockKeyhole className="h-3.5 w-3.5" /> Ativar indisponível</Button>
           )}

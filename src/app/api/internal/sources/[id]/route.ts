@@ -23,8 +23,9 @@ export async function PATCH(request: NextRequest, context: Context) {
     const user = await requireUser(request);
     rateLimit(`source:${user.id}`, 60);
     const input = objectInput(await readJson(request), ['action']);
-    if (input.action !== 'pause') throw new HttpError(400, 'Only pause is available. Source activation requires operator approval.');
-    return json({ source: await sources.change(user.id, (await context.params).id, 'pause') });
+    if (input.action !== 'pause' && input.action !== 'resume') throw new HttpError(400, 'Use pause or resume.');
+    const source = await sources.change(user.id, (await context.params).id, input.action);
+    return json({ source }, input.action === 'resume' ? 202 : 200);
   });
 }
 export async function DELETE(request: NextRequest, context: Context) {
