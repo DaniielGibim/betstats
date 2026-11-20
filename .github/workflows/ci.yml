@@ -28,24 +28,29 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npx prisma generate
-      - name: Prepare ephemeral SQLite schema
-        run: npx prisma db push --skip-generate
-      - name: Prepare isolated auth SQLite schema
-        env:
-          DATABASE_URL: file:./auth-test.sqlite
+      - name: Apply versioned migrations to ephemeral SQLite
         run: npx prisma migrate deploy
-      - name: Run synthetic DATA and auth tests
+      - name: Prepare isolated DATA, auth and Telegram SQLite schemas
+        run: |
+          suffix="$(node -p "require('node:crypto').randomBytes(12).toString('hex')")"
+          test_dir="$RUNNER_TEMP/mission6-tests-$suffix"
+          mkdir "$test_dir"
+          echo "DATA_TEST_DATABASE=file:$test_dir/data-test.sqlite" >> "$GITHUB_ENV"
+          echo "AUTH_TEST_DATABASE_URL=file:$test_dir/auth-test.sqlite" >> "$GITHUB_ENV"
+          DATABASE_URL="file:$test_dir/data-test.sqlite" npx prisma migrate deploy
+          DATABASE_URL="file:$test_dir/auth-test.sqlite" npx prisma migrate deploy
+      - name: Run synthetic DATA, auth and Telegram tests
         env:
           DATA_TEST_CLIENT: "@prisma/client"
-          DATA_TEST_DATABASE: "file:./ci.db"
           AUTH_TEST_CLIENT: "@prisma/client"
-          AUTH_TEST_DATABASE_URL: "file:./auth-test.sqlite"
-        run: npm test
+        run: npm run test:ci
       - name: Generate Next.js types
         run: npx next typegen
       - name: Type-check
         run: npx tsc --noEmit --incremental false
+      - name: Compile standalone Telegram worker
+        run: npx tsc -p scripts/tsconfig.telegram.json
       - name: Lint source
-        run: npx eslint src eslint.config.mjs next.config.ts postcss.config.mjs tailwind.config.ts
+        run: npx eslint src scripts/telegram-worker.ts eslint.config.mjs next.config.ts postcss.config.mjs tailwind.config.ts
       - name: Build
         run: npm run build

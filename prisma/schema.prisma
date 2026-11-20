@@ -157,6 +157,7 @@ model DataSource {
   authorizationRef String
   authorizedAt     DateTime
   activatedAt      DateTime?
+  activationUpdateId BigInt?
   active           Boolean         @default(false)
   removedAt        DateTime?
   createdAt        DateTime        @default(now())
@@ -294,6 +295,10 @@ model CollectionRun {
   id               String          @id @default(uuid())
   dataSourceId     String
   dataSource       DataSource      @relation(fields: [dataSourceId], references: [id], onDelete: Restrict)
+  botUserId        String?
+  pollingState     TelegramPollingState? @relation(fields: [botUserId], references: [botUserId], onDelete: Restrict)
+  firstUpdateId    BigInt?
+  lastUpdateId     BigInt?
   startedAt        DateTime
   finishedAt       DateTime?
   status           String
@@ -310,5 +315,38 @@ model CollectionRun {
 
   @@unique([id, dataSourceId])
   @@index([dataSourceId, startedAt])
+  @@index([botUserId, startedAt])
   @@index([status, startedAt])
+}
+
+// The Bot API update offset belongs to a bot, not to an individual source.
+// Advance the cursor only after the corresponding update is processed durably.
+model TelegramPollingState {
+  botUserId             String   @id
+  lastConfirmedUpdateId BigInt?
+  lastPollAt            DateTime?
+  lastSuccessAt         DateTime?
+  lastHeartbeatAt       DateTime?
+  lastErrorAt           DateTime?
+  lastErrorCode         String?
+  leaseOwnerId          String?
+  leaseToken            BigInt   @default(0)
+  leaseExpiresAt        DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  collectionRuns CollectionRun[]
+  updateReceipts TelegramUpdateReceipt[]
+}
+
+// One receipt per Bot API update; no message body or raw payload is retained here.
+model TelegramUpdateReceipt {
+  botUserId   String
+  pollingState TelegramPollingState @relation(fields: [botUserId], references: [botUserId], onDelete: Restrict)
+  updateId    BigInt
+  outcome     String
+  processedAt DateTime @default(now())
+
+  @@id([botUserId, updateId])
+  @@index([processedAt])
 }

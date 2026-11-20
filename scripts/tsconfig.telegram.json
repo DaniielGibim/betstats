@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "rootDir": "..",
+    "outDir": "../build/telegram-worker"
+  },
+  "files": ["telegram-worker.ts"]
+}

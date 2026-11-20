@@ -144,7 +144,23 @@ test('HTTP routes enforce CSRF, production signup gate, cookies and owner authen
     const id = (await created.json()).source.id;
     assert.equal((await detail.PATCH(request('/api/internal/sources/' + id, 'PATCH', { action: 'activate' }, tokenCookie), { params: Promise.resolve({ id }) })).status, 400);
     assert.equal((await detail.PATCH(request('/api/internal/sources/' + id, 'PATCH', { action: 'pause' }, tokenCookie), { params: Promise.resolve({ id }) })).status, 200);
-    assert.equal((await detail.DELETE(request('/api/internal/sources/' + id, 'DELETE', undefined, tokenCookie), { params: Promise.resolve({ id }) })).status, 200);
+    const context = { params: Promise.resolve({ id }) };
+    const resume = (cookie, origin) => detail.PATCH(request('/api/internal/sources/' + id, 'PATCH', { action: 'resume' }, cookie, origin), context);
+    assert.equal((await resume()).status, 401);
+    assert.equal((await resume(tokenCookie, 'https://evil.example')).status, 403);
+    assert.equal((await resume(tokenCookie)).status, 409, 'A draft has no earlier activation to resume');
+    const owner = await prisma.user.findUniqueOrThrow({ where: { email: input.email } });
+    const linked = await prisma.dataSource.create({ data: {
+      ownerUserId: owner.id, platform: 'telegram', chatType: 'channel', externalChatId: '-' + BigInt('0x' + suffix).toString(),
+      authorizationRef: 'test:resume', authorizedAt: new Date(), activatedAt: new Date(), activationUpdateId: 10n, active: false,
+    } });
+    await prisma.sourceRegistration.update({ where: { id }, data: { resolvedSourceId: linked.id } });
+    const resumed = await resume(tokenCookie);
+    assert.equal(resumed.status, 202);
+    assert.equal((await resumed.json()).source.status, 'resume_requested');
+    assert.equal((await prisma.dataSource.findUniqueOrThrow({ where: { id: linked.id } })).active, false);
+    assert.equal((await detail.DELETE(request('/api/internal/sources/' + id, 'DELETE', undefined, tokenCookie), context)).status, 200);
+    assert.equal((await resume(tokenCookie)).status, 404);
     const cleared = await logout.POST(request('/api/auth/logout', 'POST', undefined, tokenCookie));
     assert.equal(cleared.status, 200);
     assert.match(cleared.headers.get('set-cookie'), /Max-Age=0/i);
