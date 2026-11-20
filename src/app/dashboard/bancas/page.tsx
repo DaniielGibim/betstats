@@ -35,10 +35,12 @@ export default function BancasPage() {
   const [unidadeEfetiva, setUnidadeEfetiva] = useState("100.00");
   const [cor, setCor] = useState("#3b82f6");
   const [loading, setLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nome) return;
+    setCreateError(null);
     setLoading(true);
     try {
       const res = await fetch("/api/internal/bancas", {
@@ -58,9 +60,18 @@ export default function BancasPage() {
         setModalOpen(false);
         setNome("");
         setDescricao("");
+        setCreateError(null);
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setCreateError(
+        res.status === 401 || res.status === 403
+          ? "Sua sessão não permite cadastrar a banca. Entre novamente e tente de novo."
+          : "Não foi possível cadastrar a banca. Verifique os dados e tente novamente."
+      );
+    } catch {
+      setCreateError(
+        "Não foi possível confirmar o cadastro. Verifique sua conexão e tente novamente."
+      );
     } finally {
       setLoading(false);
     }
@@ -197,12 +208,27 @@ export default function BancasPage() {
       </div>
 
       {/* Modal Nova Banca */}
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+      <Dialog
+        open={modalOpen}
+        onOpenChange={(open) => {
+          setModalOpen(open);
+          if (open) setCreateError(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Cadastrar Nova Banca</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 py-2">
+            {createError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+              >
+                {createError}
+              </div>
+            )}
             <div>
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Nome da Banca

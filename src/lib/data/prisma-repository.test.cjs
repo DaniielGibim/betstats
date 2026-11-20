@@ -1,12 +1,15 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { test } = require('node:test');
 const ts = require('typescript');
 require.extensions['.ts'] = (mod, file) => mod._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, file);
-const { PrismaClient } = require(process.env.DATA_TEST_CLIENT);
 const { createDataRepository } = require('./prisma-repository.ts');
-const db = new PrismaClient({ datasources: { db: { url: process.env.DATA_TEST_DATABASE } } });
-(async () => {
+test('isolated SQLite DATA ingestion, replay, edit, media, eligibility and rollback', { skip: !process.env.DATA_TEST_CLIENT || !process.env.DATA_TEST_DATABASE }, async () => {
+  assert.match(process.env.DATA_TEST_DATABASE, /^file:.*[/\\]mission6-tests-[a-f0-9]+[/\\]data-test\.sqlite$/, 'Use the dedicated isolated database');
+  const { PrismaClient } = require(process.env.DATA_TEST_CLIENT);
+  const db = new PrismaClient({ datasources: { db: { url: process.env.DATA_TEST_DATABASE } } });
+  try {
   const source = await db.dataSource.create({ data: { platform: 'synthetic', externalChatId: 'test-' + Date.now(), chatType: 'synthetic', authorizationRef: 'synthetic:test', authorizedAt: new Date('2026-01-01T00:00:00Z'), activatedAt: new Date('2026-01-02T00:00:00Z'), active: true } });
   const run = await db.collectionRun.create({ data: { dataSourceId: source.id, startedAt: new Date('2026-01-02T00:00:00Z'), status: 'running', collectorVersion: 'synthetic-1' } });
   const repo = createDataRepository(db);
@@ -41,4 +44,5 @@ const db = new PrismaClient({ datasources: { db: { url: process.env.DATA_TEST_DA
   await assert.rejects(createDataRepository(failing).ingest({ ...input, message: { ...base, externalMessageId: 'rollback' } }));
   assert.equal(await db.sourceMessage.count({ where: { externalMessageId: 'rollback' } }), 0);
   console.log('SQLite isolated ingestion, replay, edit, media, recordless, eligibility and rollback tests passed');
-})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => db.$disconnect());
+  } finally { await db.$disconnect(); }
+});

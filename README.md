@@ -38,6 +38,24 @@ npm run dev -- --hostname 127.0.0.1
 
 Não execute `npm run prisma:seed` com dados reais ou observados.
 
+## Retomada da coleta Telegram
+
+Após perda de acesso do bot ou retirada da aprovação, uma fonte pode voltar a
+coletar quando o worker confirma a mesma aprovação para bot, canal, dono e
+referência de autorização. O worker confere o ID canônico do canal e a função
+de administrador do bot e espera um lote vazio antes de reativar. O cadastro, o
+marco original de ativação, o cursor e os recibos são preservados. A coleta
+retoma com updates acima do cursor da retomada e posts criados a partir do
+segundo seguinte, inclusive para edições. Pausas manuais, remoções e pausas
+legadas sem evidência suficiente de terem sido feitas pelo worker permanecem
+fora da coleta.
+
+Na inicialização, falhas transitórias de `getMe` recebem até cinco tentativas
+com espera exponencial de 1, 2, 4 e 8 segundos. O worker respeita `Retry-After`
+de até 60 segundos e encerra se o Telegram pedir uma espera maior. A última
+falha fica registrada como código de saúde, sem URL ou token. A coleta começa
+somente após a confirmação do ID esperado. Um ID divergente encerra o worker.
+
 ## Verificações
 
 ```bash

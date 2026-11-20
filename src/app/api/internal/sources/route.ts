@@ -2,11 +2,15 @@ import { NextRequest } from 'next/server';
 import { handle, json, readJson, requireUser, sameOrigin } from '@/lib/auth/http';
 import { createSourceService, type SourceDatabase } from '@/lib/auth/sources';
 import { rateLimit } from '@/lib/auth/security';
+import { sourceConnectionSnapshot } from '@/lib/telegram/connection-service';
 import { prisma } from '@/lib/prisma';
 export const runtime = 'nodejs';
 const sources = createSourceService(prisma as unknown as SourceDatabase);
 export async function GET(request: NextRequest) {
-  return handle(async () => json({ sources: await sources.list((await requireUser(request)).id) }));
+  return handle(async () => {
+    const user = await requireUser(request);
+    return json(await sourceConnectionSnapshot(prisma, user.id, await sources.list(user.id)));
+  });
 }
 export async function POST(request: NextRequest) {
   return handle(async () => {
